@@ -602,24 +602,28 @@ function calcYears(p, prepayList=[]) {
     const in_sublease = p.sublease_on && yr <= p.sublease_years;
     if (p.sublease_on) {
       if (in_sublease) {
-        // サブリース期間：固定賃料・入居率100%
+        // ─── サブリース期間：固定賃料・入居率100% ───
         rent_annual = p.sublease_rent * 12;
       } else {
-        // 解除後：解除直後の年を基準に変動
-        const yrs_after = yr - p.sublease_years; // 解除後の経過年数
+        // ─── サブリース解除後 ───
+        const yrs_after = yr - p.sublease_years; // 解除後の経過年数（1始まり）
+
         if (yrs_after === 1) {
-          // 解除直後：市場賃料へ切り替え
+          // 解除直後：入力した市場賃料×入居率で初期化
           post_sl_rent = p.rent_m * 12 * p.occ_rate;
-          rent_annual = post_sl_rent;
-        } else if (yrs_after > p.decline_start) {
-          post_sl_rent *= (1 - p.decline_rate + p.rise_rate_v);
-          rent_annual = post_sl_rent;
+        } else {
+          // 解除後2年目以降：下落開始年数を超えたら変動適用
+          if (yrs_after > p.decline_start) {
+            post_sl_rent = post_sl_rent * (1 - p.decline_rate + p.rise_rate_v);
+          }
+          // decline_start以下の年は前年のpost_sl_rentをそのまま維持
         }
+        rent_annual = post_sl_rent;
       }
     } else {
-      // サブリースなし：従来通り
+      // ─── サブリースなし：従来通り ───
       if (yr > 1 && yr >= p.decline_start)
-        rent_annual *= (1 - p.decline_rate + p.rise_rate_v);
+        rent_annual = rent_annual * (1 - p.decline_rate + p.rise_rate_v);
     }
 
     const rent_full = p.sublease_on && in_sublease ? p.sublease_rent * 12 : p.rent_m * 12;
