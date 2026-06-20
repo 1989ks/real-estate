@@ -55,7 +55,7 @@
   .tax-result-row{display:flex;justify-content:space-between;padding:2px 0;}
   .tax-result-row.total{font-weight:800;font-size:13px;color:var(--navy);border-top:1px solid #86efac;margin-top:4px;padding-top:4px;}
 
-  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
+  .kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
   .kpi-card{background:white;border-radius:10px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,.08);border-left:4px solid var(--blue);}
   .kpi-card.green{border-left-color:var(--green);}
   .kpi-card.accent{border-left-color:var(--accent);}
@@ -156,7 +156,7 @@
     <h1>🏠 不動産投資 CFシミュレーター</h1>
     <p>税率自動計算・物件保存機能付き｜MacBook対応版</p>
   </div>
-  <div class="header-badge">iPhone対応</div>
+  <div class="header-badge">v4 PWA</div>
 </header>
 
 <div class="tabs">
@@ -174,8 +174,15 @@
     <div class="card">
       <div class="card-header">🏢 物件情報</div>
       <div class="card-body">
-        <div class="field"><label>物件価格</label><input type="number" id="price" value="6000"><span class="unit">万円</span></div>
-        <div class="field"><label>自己資金（諸費用込み）</label><input type="number" id="equity" value="600"><span class="unit">万円</span></div>
+        <div class="field"><label>物件価格</label><input type="number" id="price" value="6000" oninput="calcLoan()"><span class="unit">万円</span></div>
+        <div class="field"><label>諸費用</label><input type="number" id="misc_cost" value="30" oninput="calcLoan()"><span class="unit">万円</span></div>
+        <div class="field"><label>自己資金</label><input type="number" id="equity" value="600" oninput="calcLoan()"><span class="unit">万円</span></div>
+        <div class="field">
+          <label>融資額<span class="auto-badge">自動</span></label>
+          <input type="number" id="loan_amount" readonly style="background:#f1f5f9;color:#374151;">
+          <span class="unit">万円</span>
+        </div>
+        <div class="note" style="margin-top:4px;">融資額 ＝ 物件価格 ＋ 諸費用 － 自己資金</div>
         <div class="field"><label>構造</label>
           <select id="structure">
             <option value="wood">木造（22年）</option>
@@ -472,7 +479,9 @@ function getInputs() {
   const sublease_on = document.getElementById('sublease_on').checked;
   return {
     price:          parseFloat(document.getElementById('price').value),
+    misc_cost:      parseFloat(document.getElementById('misc_cost').value) || 0,
     equity:         parseFloat(document.getElementById('equity').value),
+    loan_amount:    parseFloat(document.getElementById('loan_amount').value) || 0,
     structure:      document.getElementById('structure').value,
     age:            parseFloat(document.getElementById('age').value),
     land_r:         parseFloat(document.getElementById('land_ratio').value)/100,
@@ -512,7 +521,8 @@ function getInputs() {
 // ===== 入力値セット =====
 function setInputs(p) {
   const map = {
-    price:'price', equity:'equity', structure:'structure', age:'age',
+    price:'price', misc_cost:'misc_cost', equity:'equity',
+    loan_amount:'loan_amount', structure:'structure', age:'age',
     land_r:'land_ratio', bldg_r:'bldg_ratio', equip_r:'equip_ratio',
     sim_years:'sim_years', base_rate:'rate', loan_years:'loan_years',
     rate_rise_yr:'rate_rise_yr', rate_rise:'rate_rise',
@@ -541,7 +551,7 @@ let lastInputs = {};
 
 function calcYears(p, prepayList=[]) {
   const eff_rate = p.income_tax + p.local_tax;
-  const loan = p.price - p.equity;
+  const loan = p.loan_amount > 0 ? p.loan_amount : (p.price + p.misc_cost - p.equity);
   const useful_life = getUsefulLife(p.structure);
   const remain_bldg = Math.max(1, useful_life - p.age);
   const equip_life = Math.round(useful_life * 0.6);
@@ -626,11 +636,14 @@ function calcYears(p, prepayList=[]) {
     const real_cf = cf_base + tax_effect;
     cumCF += real_cf;
 
+    const roi_yr = p.price > 0 ? cf_base / p.price * 100 : 0;
+    const ccr_yr = p.equity > 0 ? cf_base / p.equity * 100 : 0;
     years.push({yr, rate, annual_pmt, interest, principal, balance,
       rent_full, rent_annual, exp_total, noi, cf_base,
       dep_bldg, dep_equip, dep_total, tax_income, tax_effect,
       real_cf, cumCF, monthly_cf:cf_base/12, monthly_real:real_cf/12,
-      in_sublease, prepay_amt, prepay_type});
+      in_sublease, prepay_amt, prepay_type,
+      roi:roi_yr, ccr:ccr_yr});
   }
   return {years, loan, useful_life, remain_bldg, remain_equip, dep_bldg, dep_equip_yr, eff_rate};
 }
@@ -648,11 +661,17 @@ function calculate() {
   const real_yield = yr1.noi/p.price*100;
 
   // KPI
+  // ROI=税前年間CF÷物件価格、CCR=税前年間CF÷自己資金
+  const roi = yr1.cf_base / p.price * 100;
+  const ccr = p.equity > 0 ? yr1.cf_base / p.equity * 100 : 0;
+  const ltv = loan / p.price * 100;
   document.getElementById('kpi-area').innerHTML = `
-    <div class="kpi-card"><div class="kpi-label">表面利回り</div><div class="kpi-value">${surface_yield.toFixed(2)}%</div><div class="kpi-sub">年間満室賃料 ÷ 物件価格</div></div>
-    <div class="kpi-card green"><div class="kpi-label">実質利回り（初年度）</div><div class="kpi-value">${real_yield.toFixed(2)}%</div><div class="kpi-sub">NOI ÷ 物件価格</div></div>
+    <div class="kpi-card"><div class="kpi-label">表面利回り</div><div class="kpi-value">${surface_yield.toFixed(2)}%</div><div class="kpi-sub">満室賃料÷物件価格</div></div>
+    <div class="kpi-card green"><div class="kpi-label">実質利回り（初年度）</div><div class="kpi-value">${real_yield.toFixed(2)}%</div><div class="kpi-sub">NOI÷物件価格</div></div>
     <div class="kpi-card accent"><div class="kpi-label">初年度 実質月CF</div><div class="kpi-value">${fmt(yr1.monthly_real)}万円</div><div class="kpi-sub">節税効果込み</div></div>
-    <div class="kpi-card ${loan/p.price>0.9?'red':'green'}"><div class="kpi-label">借入額</div><div class="kpi-value">${fmt(loan,0)}万円</div><div class="kpi-sub">LTV ${(loan/p.price*100).toFixed(1)}%</div></div>`;
+    <div class="kpi-card ${roi>=0?'green':'red'}"><div class="kpi-label">ROI（初年度）</div><div class="kpi-value">${roi.toFixed(2)}%</div><div class="kpi-sub">税前CF÷物件価格</div></div>
+    <div class="kpi-card ${ccr>=0?'green':'red'}"><div class="kpi-label">CCR（初年度）</div><div class="kpi-value">${ccr.toFixed(2)}%</div><div class="kpi-sub">税前CF÷自己資金</div></div>
+    <div class="kpi-card ${ltv>90?'red':ltv>80?'accent':'green'}"><div class="kpi-label">借入額 / LTV</div><div class="kpi-value">${fmt(loan,0)}万円</div><div class="kpi-sub">LTV ${ltv.toFixed(1)}%</div></div>`;
 
   // CFテーブル
   document.getElementById('cf-head').innerHTML =
@@ -682,6 +701,8 @@ function calculate() {
     {label:'■ CF本体（税引前）', sub:true},
     {label:'　年間CF（税引前）', key:'cf_base', color:true, indent:true},
     {label:'　月CF（税引前）', key:'monthly_cf', color:true, indent:true},
+    {label:'　ROI（税前CF÷物件価格）', key:'roi', pct:true, color:true, indent:true, roi:true},
+    {label:'　CCR（税前CF÷自己資金）', key:'ccr', pct:true, color:true, indent:true, ccr:true},
     {label:'■ 税務・節税', section:true},
     {label:'　建物減価償却費', key:'dep_bldg', indent:true},
     {label:'　設備減価償却費', key:'dep_equip', indent:true},
@@ -704,6 +725,12 @@ function calculate() {
       tbody += `<tr class="total-row"><td class="label-col">${r.label}</td>${years.map(()=>'<td></td>').join('')}</tr>`;
     else if (r.cumsum)
       tbody += `<tr class="cumsum-row"><td class="label-col indent">${r.label}</td>${years.map(y=>`<td class="${colorClass(y[r.key])}">${fmt(y[r.key])}</td>`).join('')}</tr>`;
+    else if (r.roi || r.ccr)
+      tbody += `<tr><td class="label-col indent">${r.label}</td>${years.map(y=>{
+        const v = r.roi ? y.roi : y.ccr;
+        const bg = y.in_sublease ? 'background:#fef9c3;' : '';
+        return `<td class="${colorClass(v)}" style="${bg}">${v.toFixed(2)}%</td>`;
+      }).join('')}</tr>`;
     else if (r.prepay)
       tbody += `<tr><td class="label-col indent">${r.label}</td>${years.map(y=>{
         const v = y.prepay_amt||0;
@@ -732,8 +759,11 @@ function calculate() {
   document.getElementById('summary-area').innerHTML = `
     <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);">
       <div class="kpi-card"><div class="kpi-label">表面利回り</div><div class="kpi-value">${surface_yield.toFixed(2)}%</div></div>
-      <div class="kpi-card green"><div class="kpi-label">実質利回り（初年度）</div><div class="kpi-value">${real_yield.toFixed(2)}%</div></div>
-      <div class="kpi-card accent"><div class="kpi-label">初年度 実質月CF</div><div class="kpi-value">${fmt(yr1.monthly_real)}万円</div></div>
+      <div class="kpi-card green"><div class="kpi-label">実質利回り</div><div class="kpi-value">${real_yield.toFixed(2)}%</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">実質月CF（初年度）</div><div class="kpi-value">${fmt(yr1.monthly_real)}万円</div></div>
+      <div class="kpi-card ${roi>=0?'green':'red'}"><div class="kpi-label">ROI（初年度）</div><div class="kpi-value">${roi.toFixed(2)}%</div><div class="kpi-sub">税前CF÷物件価格</div></div>
+      <div class="kpi-card ${ccr>=0?'green':'red'}"><div class="kpi-label">CCR（初年度）</div><div class="kpi-value">${ccr.toFixed(2)}%</div><div class="kpi-sub">税前CF÷自己資金</div></div>
+      <div class="kpi-card"><div class="kpi-label">自己資金</div><div class="kpi-value">${fmt(p.equity,0)}万円</div><div class="kpi-sub">諸費用込み</div></div>
     </div>
     <table class="summary-table">
       <thead><tr><th style="text-align:left">項目</th><th>初年度</th><th>5年目</th><th>10年目</th><th>${p.sim_years}年目</th></tr></thead>
@@ -743,13 +773,16 @@ function calculate() {
         <tr><td>年間返済額</td><td>${fmt(yr1.annual_pmt)}</td><td>${fmt(yr5.annual_pmt)}</td><td>${yr10?fmt(yr10.annual_pmt):'－'}</td><td>${yr20?fmt(yr20.annual_pmt):'－'}</td></tr>
         <tr><td>CF本体（年額）</td><td class="${colorClass(yr1.cf_base)}">${fmt(yr1.cf_base)}</td><td class="${colorClass(yr5.cf_base)}">${fmt(yr5.cf_base)}</td><td class="${colorClass(yr10?yr10.cf_base:0)}">${yr10?fmt(yr10.cf_base):'－'}</td><td class="${colorClass(yr20?yr20.cf_base:0)}">${yr20?fmt(yr20.cf_base):'－'}</td></tr>
         <tr><td>節税効果（年額）</td><td class="${colorClass(yr1.tax_effect)}">${fmt(yr1.tax_effect)}</td><td class="${colorClass(yr5.tax_effect)}">${fmt(yr5.tax_effect)}</td><td class="${colorClass(yr10?yr10.tax_effect:0)}">${yr10?fmt(yr10.tax_effect):'－'}</td><td class="${colorClass(yr20?yr20.tax_effect:0)}">${yr20?fmt(yr20.tax_effect):'－'}</td></tr>
+        <tr><td>ROI（税前CF÷物件価格）</td><td class="${colorClass(yr1.roi)}">${yr1.roi.toFixed(2)}%</td><td class="${colorClass(yr5.roi)}">${yr5.roi.toFixed(2)}%</td><td class="${colorClass(yr10?yr10.roi:0)}">${yr10?yr10.roi.toFixed(2)+'%':'－'}</td><td class="${colorClass(yr20?yr20.roi:0)}">${yr20?yr20.roi.toFixed(2)+'%':'－'}</td></tr>
+        <tr><td>CCR（税前CF÷自己資金）</td><td class="${colorClass(yr1.ccr)}">${yr1.ccr.toFixed(2)}%</td><td class="${colorClass(yr5.ccr)}">${yr5.ccr.toFixed(2)}%</td><td class="${colorClass(yr10?yr10.ccr:0)}">${yr10?yr10.ccr.toFixed(2)+'%':'－'}</td><td class="${colorClass(yr20?yr20.ccr:0)}">${yr20?yr20.ccr.toFixed(2)+'%':'－'}</td></tr>
         <tr style="font-weight:800"><td>実質CF（月額）</td><td class="${colorClass(yr1.monthly_real)}">${fmt(yr1.monthly_real)}</td><td class="${colorClass(yr5.monthly_real)}">${fmt(yr5.monthly_real)}</td><td class="${colorClass(yr10?yr10.monthly_real:0)}">${yr10?fmt(yr10.monthly_real):'－'}</td><td class="${colorClass(yr20?yr20.monthly_real:0)}">${yr20?fmt(yr20.monthly_real):'－'}</td></tr>
         <tr><td>累計実質CF</td><td>${fmt(yr1.cumCF)}</td><td>${fmt(yr5.cumCF)}</td><td>${yr10?fmt(yr10.cumCF):'－'}</td><td>${yr20?fmt(yr20.cumCF):'－'}</td></tr>
         <tr><td>ローン残高</td><td>${fmt(yr1.balance,0)}</td><td>${fmt(yr5.balance,0)}</td><td>${yr10?fmt(yr10.balance,0):'－'}</td><td>${yr20?fmt(yr20.balance,0):'－'}</td></tr>
       </tbody>
     </table>
     <div class="note" style="margin-top:12px;">
-      借入額：${fmt(loan,0)}万円　融資期間：${p.loan_years}年　当初金利：${(p.base_rate*100).toFixed(2)}%（${p.rate_rise_yr}年目以降+${(p.rate_rise*100).toFixed(1)}%）<br>
+      物件価格：${fmt(p.price,0)}万円　諸費用：${fmt(p.misc_cost,0)}万円　自己資金：${fmt(p.equity,0)}万円　融資額：${fmt(loan,0)}万円（LTV ${ltv.toFixed(1)}%）<br>
+      融資期間：${p.loan_years}年　当初金利：${(p.base_rate*100).toFixed(2)}%（${p.rate_rise_yr}年目以降+${(p.rate_rise*100).toFixed(1)}%）<br>
       実効税率：${(eff_rate*100).toFixed(0)}%（所得税${(p.income_tax*100).toFixed(0)}%＋住民税${(p.local_tax*100).toFixed(0)}%）　減価償却：建物${fmt(dep_bldg)}万円/年（残${remain_bldg}年）設備${fmt(dep_equip_yr)}万円/年（残${remain_equip}年）
     </div>`;
 
@@ -925,7 +958,17 @@ function importData(event) {
 }
 
 // ===== 初期化 =====
+// ===== 融資額自動計算 =====
+function calcLoan() {
+  const price  = parseFloat(document.getElementById('price').value) || 0;
+  const misc   = parseFloat(document.getElementById('misc_cost').value) || 0;
+  const equity = parseFloat(document.getElementById('equity').value) || 0;
+  const loan   = Math.max(0, price + misc - equity);
+  document.getElementById('loan_amount').value = loan;
+}
+
 window.onload = () => {
+  calcLoan();
   calcTax();
   calculate();
   renderSavedList();
